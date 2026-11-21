@@ -7,19 +7,21 @@ import React, { useRef, useEffect } from 'react';
  * Supports:
  * - Direct keyboard input (1-9 to input, Backspace/Delete/0 to clear)
  * - Arrow key navigation (Up/Down/Left/Right)
- * - Visual distinction between initial known clues vs LLM-solved numbers
+ * - Visual distinction between known clues and solver output
  * - Real-time conflict/duplicate highlighting
  */
 export default function SudokuTable({
   board,
   initialClues,
   conflicts,
+  fromMock,
   isSolving,
   onCellChange,
   focusedCell,
   setFocusedCell
 }) {
   const tableRef = useRef(null);
+  const solverLabel = fromMock ? 'Mock' : 'Solved';
 
   // Focus the input when focusedCell changes programmatically
   useEffect(() => {
@@ -77,7 +79,7 @@ export default function SudokuTable({
             <tr key={`row-${r}`} className={`sudoku-row ${r % 3 === 2 && r !== 8 ? 'subgrid-bottom-border' : ''}`}>
               {row.map((val, c) => {
                 const isInitialClue = initialClues[r][c] !== 0;
-                const isSolvedByLLM = !isInitialClue && val !== 0;
+                const isSolverFill = !isInitialClue && val !== 0;
                 const hasConflict = conflicts.has(`${r},${c}`);
                 const isFocused = focusedCell?.r === r && focusedCell?.c === c;
 
@@ -88,7 +90,7 @@ export default function SudokuTable({
 
                 const cellStateClass = hasConflict
                   ? 'cell-conflict'
-                  : isSolvedByLLM
+                  : isSolverFill
                   ? 'cell-solved-llm'
                   : isInitialClue
                   ? 'cell-initial-clue'
@@ -115,9 +117,9 @@ export default function SudokuTable({
                       aria-label={`Row ${r + 1}, Column ${c + 1}`}
                       autoComplete="off"
                     />
-                    {isSolvedByLLM && (
-                      <span className="llm-pill" title="Solved by LLM">
-                        LLM
+                    {isSolverFill && (
+                      <span className="llm-pill">
+                        {solverLabel}
                       </span>
                     )}
                   </td>

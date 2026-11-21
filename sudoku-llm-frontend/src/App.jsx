@@ -6,7 +6,7 @@ import StatusCard from './components/StatusCard';
 import {
   solveSudokuWithLLM,
   DEFAULT_BACKEND_URL,
-  PayloadFormat
+  SOLVER_MODES
 } from './services/backendApi';
 import {
   createEmptyBoard,
@@ -29,34 +29,32 @@ export default function App() {
   const [isSolving, setIsSolving] = useState(false);
   const [status, setStatus] = useState('idle'); // 'idle' | 'solving' | 'success' | 'error'
   const [error, setError] = useState(null);
-  const [latencyMs, setLatencyMs] = useState(null);
-  const [rawResponse, setRawResponse] = useState(null);
-  const [hasSolution, setHasSolution] = useState(false);
+  const [result, setResult] = useState(null);
+  const [comparison, setComparison] = useState({});
 
   // Backend connection settings
   const [backendConfig, setBackendConfig] = useState({
     endpoint: DEFAULT_BACKEND_URL,
     apiKey: '',
-    payloadFormat: PayloadFormat.GRID_2D,
-    useMock: true // Defaults to true so frontend is immediately testable before backend is up
+    mode: 'classic',
+    useMock: false
   });
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
   // Calculate real-time conflicts
   const conflicts = useMemo(() => findBoardConflicts(board), [board]);
-  const cluesCount = useMemo(() => countClues(board), [board]);
+  const cluesCount = useMemo(() => countClues(initialClues), [initialClues]);
   const hasConflicts = conflicts.size > 0;
 
   // Handle cell value changes
   const handleCellChange = (r, c, val) => {
-    const newBoard = board.map(row => [...row]);
+    if (board[r][c] === val && initialClues[r][c] === val) return;
     const newClues = initialClues.map(row => [...row]);
-
-    newBoard[r][c] = val;
-    newClues[r][c] = val; // Entering a value marks it as an initial known clue
-
-    setBoard(newBoard);
+    newClues[r][c] = val;
+    setBoard(newClues);
     setInitialClues(newClues);
+    setResult(null);
+    setComparison({});
     setError(null);
     if (status !== 'idle') setStatus('idle');
   };
@@ -67,8 +65,7 @@ export default function App() {
     handleCellChange(focusedCell.r, focusedCell.c, num);
   };
 
-  // Solve board using LLM
-  const handleSolve = async () => {
+  const handleSolve = async (compare = false) => {
     if (hasConflicts) {
       setError('Please resolve conflicting numbers highlighted in red before submitting.');
       return;
@@ -81,22 +78,33 @@ export default function App() {
     setIsSolving(true);
     setStatus('solving');
     setError(null);
-    setRawResponse(null);
+    if (compare) setComparison({});
 
-    // Snapshot the current known numbers as initial clues before solving
-    const lockedClues = board.map(r => [...r]);
-    setInitialClues(lockedClues);
-
+    const modes = compare ? SOLVER_MODES.map(({ id }) => id) : [backendConfig.mode];
+    let displayedResult = null;
+    const errors = [];
     try {
-      const result = await solveSudokuWithLLM(board, backendConfig);
-      setBoard(result.solution);
-      setLatencyMs(result.latencyMs);
-      setRawResponse(result.rawResponse);
-      setStatus('success');
-      setHasSolution(true);
-    } catch (err) {
-      setError(err.message || 'An unknown error occurred while contacting the LLM backend.');
-      setStatus('error');
+      for (const mode of modes) {
+        try {
+          const nextResult = await solveSudokuWithLLM(initialClues, { ...backendConfig, mode });
+          if (!displayedResult || mode === backendConfig.mode) displayedResult = nextResult;
+          if (nextResult.stats) {
+            setComparison(previous => ({ ...previous, [mode]: { stats: nextResult.stats } }));
+          }
+        } catch (err) {
+          const label = SOLVER_MODES.find(({ id }) => id === mode)?.label;
+          errors.push(compare ? `${label}: ${err.message}` : err.message);
+          if (!backendConfig.useMock) {
+            setComparison(previous => ({ ...previous, [mode]: { error: err.message, stats: err.stats } }));
+          }
+        }
+      }
+      if (displayedResult) {
+        setBoard(displayedResult.solution);
+        setResult(displayedResult);
+      }
+      setError(errors.length ? errors.join(' · ') : null);
+      setStatus(displayedResult ? 'success' : 'error');
     } finally {
       setIsSolving(false);
     }
@@ -109,9 +117,8 @@ export default function App() {
     setInitialClues(empty);
     setStatus('idle');
     setError(null);
-    setLatencyMs(null);
-    setRawResponse(null);
-    setHasSolution(false);
+    setResult(null);
+    setComparison({});
   };
 
   // Reset back to initial known clues (clearing LLM filled cells)
@@ -119,7 +126,8 @@ export default function App() {
     setBoard(initialClues.map(r => [...r]));
     setStatus('idle');
     setError(null);
-    setHasSolution(false);
+    setResult(null);
+    setComparison({});
   };
 
   // Load a preset puzzle
@@ -129,9 +137,8 @@ export default function App() {
     setInitialClues(cloned.map(r => [...r]));
     setStatus('idle');
     setError(null);
-    setLatencyMs(null);
-    setRawResponse(null);
-    setHasSolution(false);
+    setResult(null);
+    setComparison({});
   };
 
   return (
@@ -163,7 +170,8 @@ export default function App() {
         <BackendConfig
           config={backendConfig}
           onChangeConfig={setBackendConfig}
-          currentBoard={board}
+          currentBoard={initialClues}
+          isSolving={isSolving}
           isOpen={isConfigOpen}
           onToggle={() => setIsConfigOpen(!isConfigOpen)}
         />
@@ -184,7 +192,7 @@ export default function App() {
                     <span className="legend-chip legend-chip-clue"></span> Known Clue
                   </span>
                   <span className="legend-item">
-                    <span className="legend-chip legend-chip-llm"></span> Solved by LLM
+                    <span className="legend-chip legend-chip-llm"></span> Filled by Solver
                   </span>
                   <span className="legend-item">
                     <span className="legend-chip legend-chip-conflict"></span> Conflict
@@ -197,6 +205,7 @@ export default function App() {
                 board={board}
                 initialClues={initialClues}
                 conflicts={conflicts}
+                fromMock={result?.fromMock}
                 isSolving={isSolving}
                 onCellChange={handleCellChange}
                 focusedCell={focusedCell}
@@ -211,40 +220,33 @@ export default function App() {
             <StatusCard
               status={status}
               error={error}
-              latencyMs={latencyMs}
+              result={status === 'success' ? result : null}
+              comparison={comparison}
               cluesCount={cluesCount}
               conflictsCount={conflicts.size}
-              rawResponse={rawResponse}
               isSolving={isSolving}
+              useMock={backendConfig.useMock}
             />
 
             {/* Action Buttons & Presets */}
             <div className="card-panel">
               <ControlBar
-                onSolve={handleSolve}
+                onSolve={() => handleSolve()}
+                onCompare={() => handleSolve(true)}
+                mode={backendConfig.mode}
+                onChangeMode={(mode) => setBackendConfig(previous => ({ ...previous, mode }))}
                 onClear={handleClear}
                 onResetToClues={handleResetToClues}
                 onLoadPreset={handleLoadPreset}
                 isSolving={isSolving}
                 hasConflicts={hasConflicts}
                 hasClues={cluesCount > 0}
-                hasSolution={hasSolution}
-                selectedNumber={board[focusedCell?.r || 0]?.[focusedCell?.c || 0] || 0}
+                hasSolution={result !== null}
+                useMock={backendConfig.useMock}
                 onSelectNumber={handleSelectNumber}
               />
             </div>
 
-            {/* Developer Backend Notes */}
-            <div className="card-panel developer-notes">
-              <h3 className="notes-title">
-                <span>🔌</span> Backend Integration Note
-              </h3>
-              <p className="notes-text">
-                This frontend sends the table state to your custom LLM backend.
-                Look at <code>src/services/backendApi.js</code> to adjust endpoints, headers,
-                or request payload shapes. Toggle <em>Mock Mode</em> in settings to test offline.
-              </p>
-            </div>
           </section>
         </div>
       </main>

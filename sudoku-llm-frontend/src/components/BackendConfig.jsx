@@ -1,26 +1,15 @@
 import React, { useState } from 'react';
-import { PayloadFormat, formatPayload } from '../services/backendApi';
+import { buildRequestBody } from '../services/backendApi';
 
 export default function BackendConfig({
   config,
   onChangeConfig,
   currentBoard,
+  isSolving,
   isOpen,
   onToggle
 }) {
   const [showPayloadPreview, setShowPayloadPreview] = useState(false);
-
-  const formattedData = formatPayload(currentBoard, config.payloadFormat);
-
-  const previewPayload = {
-    sudoku_board: formattedData,
-    format: config.payloadFormat,
-    model_params: {
-      temperature: 0.1,
-      task: 'solve_sudoku'
-    },
-    timestamp: new Date().toISOString()
-  };
 
   return (
     <div className="backend-config-card">
@@ -42,8 +31,7 @@ export default function BackendConfig({
       {isOpen && (
         <div className="config-body">
           <p className="config-description">
-            Customize how data is sent to your LLM backend server. You can change the endpoint URL,
-            authentication headers, and board data payload format.
+            Configure the local backend connection. Requests use a 9×9 grid.
           </p>
 
           <div className="form-grid">
@@ -59,29 +47,11 @@ export default function BackendConfig({
                 placeholder="http://localhost:8000/api/solve-sudoku"
                 value={config.endpoint}
                 onChange={(e) => onChangeConfig({ ...config, endpoint: e.target.value })}
-                disabled={config.useMock}
+                disabled={isSolving || config.useMock}
               />
               <span className="field-hint">
                 The POST endpoint of your custom LLM backend service.
               </span>
-            </div>
-
-            {/* Payload Format */}
-            <div className="form-group">
-              <label htmlFor="payload-format" className="form-label">
-                Board Data Format
-              </label>
-              <select
-                id="payload-format"
-                className="form-select"
-                value={config.payloadFormat}
-                onChange={(e) => onChangeConfig({ ...config, payloadFormat: e.target.value })}
-              >
-                <option value={PayloadFormat.GRID_2D}>2D Array (number[9][9])</option>
-                <option value={PayloadFormat.STRING_81}>81-Character String (e.g. 53007...)</option>
-                <option value={PayloadFormat.COORDINATES}>List of Known Clues ({'{row, col, value}'})</option>
-                <option value={PayloadFormat.PROMPT_TEXT}>ASCII Prompt Grid (for direct LLMs)</option>
-              </select>
             </div>
 
             {/* API Key (Optional) */}
@@ -93,10 +63,10 @@ export default function BackendConfig({
                 id="api-key"
                 type="password"
                 className="form-input"
-                placeholder="Bearer eyJhbGci..."
+                placeholder="Token or Bearer token"
                 value={config.apiKey}
                 onChange={(e) => onChangeConfig({ ...config, apiKey: e.target.value })}
-                disabled={config.useMock}
+                disabled={isSolving || config.useMock}
               />
             </div>
 
@@ -106,6 +76,7 @@ export default function BackendConfig({
                 <input
                   type="checkbox"
                   checked={config.useMock}
+                  disabled={isSolving}
                   onChange={(e) => onChangeConfig({ ...config, useMock: e.target.checked })}
                 />
                 <span className="checkbox-text">
@@ -125,16 +96,16 @@ export default function BackendConfig({
               className="btn btn-text"
               onClick={() => setShowPayloadPreview(!showPayloadPreview)}
             >
-              {showPayloadPreview ? 'Hide Outgoing JSON Payload Preview' : 'Preview Outgoing JSON Payload to Backend'}
+              {showPayloadPreview ? 'Hide Request Preview' : 'Preview Backend Request'}
             </button>
 
             {showPayloadPreview && (
               <div className="payload-code-block">
                 <div className="payload-code-header">
-                  <span>POST {config.endpoint}</span>
-                  <span className="format-tag">{config.payloadFormat}</span>
+                  <span>{config.useMock ? 'Example request (mock mode)' : `POST ${config.endpoint}`}</span>
+                  <span className="format-tag">GRID_2D</span>
                 </div>
-                <pre>{JSON.stringify(previewPayload, null, 2)}</pre>
+                <pre>{JSON.stringify(buildRequestBody(currentBoard, config.mode), null, 2)}</pre>
               </div>
             )}
           </div>

@@ -1,8 +1,12 @@
 import React from 'react';
 import { PRESETS } from '../utils/presets';
+import { SOLVER_MODES } from '../services/backendApi';
 
 export default function ControlBar({
   onSolve,
+  onCompare,
+  mode,
+  onChangeMode,
   onClear,
   onResetToClues,
   onLoadPreset,
@@ -10,11 +14,18 @@ export default function ControlBar({
   hasConflicts,
   hasClues,
   hasSolution,
-  selectedNumber,
+  useMock,
   onSelectNumber
 }) {
   return (
     <div className="control-bar-wrapper">
+      <div className="form-group">
+        <label htmlFor="solver-mode" className="form-label">Solving method</label>
+        <select id="solver-mode" className="form-select" value={mode}
+          disabled={isSolving || useMock} onChange={(event) => onChangeMode(event.target.value)}>
+          {SOLVER_MODES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </div>
       {/* Primary Actions */}
       <div className="action-buttons-group">
         <button
@@ -26,23 +37,32 @@ export default function ControlBar({
               ? 'Resolve red duplicate conflicts before solving'
               : !hasClues
               ? 'Enter at least one known number'
-              : 'Send board to LLM backend for solving'
+              : useMock
+              ? 'Solve the board locally'
+              : 'Send clues to the backend'
           }
         >
           {isSolving ? (
             <>
               <span className="spinner"></span>
-              Solving with LLM...
+              {useMock ? 'Solving locally...' : 'Waiting for backend...'}
             </>
           ) : (
             <>
               <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              Solve with LLM
+              {useMock ? 'Solve Locally (Mock)' : 'Solve'}
             </>
           )}
         </button>
+
+        {!useMock && (
+          <button className="btn btn-secondary" onClick={onCompare}
+            disabled={isSolving || hasConflicts || !hasClues}>
+            Compare all methods
+          </button>
+        )}
 
         {hasSolution && (
           <button

@@ -1,0 +1,114 @@
+{
+  "environment": {
+    "python": "3.14.5",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "torch": "2.15.0",
+    "transformers": "5.21.0"
+  },
+  "settings": {
+    "device": "cpu",
+    "methods": [
+      "classic",
+      "smollm2-135m",
+      "smollm2-360m"
+    ],
+    "puzzles": "puzzles.json",
+    "board_count": 1
+  },
+  "models": {
+    "smollm2-135m": {
+      "repository": "HuggingFaceTB/SmolLM2-135M-Instruct",
+      "revision": "12fd25f77366fa6b3b4b768ec3050bf629380bac",
+      "device": "cpu",
+      "dtype": "torch.float32",
+      "parameters": 134515008,
+      "parameter_bytes": 538060032,
+      "load_ms": 674.8280409956351
+    },
+    "smollm2-360m": {
+      "repository": "HuggingFaceTB/SmolLM2-360M-Instruct",
+      "revision": "a10cc1512eabd3dde888204e902eca88bddb4951",
+      "device": "cpu",
+      "dtype": "torch.float32",
+      "parameters": 361821120,
+      "parameter_bytes": 1447284480,
+      "load_ms": 455.15183301176876
+    }
+  },
+  "runs": [
+    {
+      "method": "classic",
+      "puzzle": "medium-01",
+      "difficulty": "medium",
+      "clues": 29,
+      "correct": true,
+      "attempts": 74,
+      "backtracks": 22,
+      "elapsed_ms": 2.2610831074416637,
+      "model_calls": 0,
+      "invalid_model_responses": 0,
+      "model_errors": 0
+    },
+    {
+      "method": "smollm2-135m",
+      "puzzle": "medium-01",
+      "difficulty": "medium",
+      "clues": 29,
+      "correct": true,
+      "attempts": 74,
+      "backtracks": 22,
+      "elapsed_ms": 242.45670903474092,
+      "model_calls": 3,
+      "invalid_model_responses": 0,
+      "model_errors": 0
+    },
+    {
+      "method": "smollm2-360m",
+      "puzzle": "medium-01",
+      "difficulty": "medium",
+      "clues": 29,
+      "correct": true,
+      "attempts": 70,
+      "backtracks": 18,
+      "elapsed_ms": 814.7291250061244,
+      "model_calls": 4,
+      "invalid_model_responses": 0,
+      "model_errors": 0
+    }
+  ],
+  "summary": {
+    "classic": {
+      "correct": 1,
+      "boards": 1,
+      "total_ms": 2.2610831074416637,
+      "median_ms": 2.2610831074416637,
+      "attempts": 74,
+      "backtracks": 22,
+      "model_calls": 0,
+      "invalid_model_responses": 0,
+      "model_errors": 0
+    },
+    "smollm2-135m": {
+      "correct": 1,
+      "boards": 1,
+      "total_ms": 242.45670903474092,
+      "median_ms": 242.45670903474092,
+      "attempts": 74,
+      "backtracks": 22,
+      "model_calls": 3,
+      "invalid_model_responses": 0,
+      "model_errors": 0
+    },
+    "smollm2-360m": {
+      "correct": 1,
+      "boards": 1,
+      "total_ms": 814.7291250061244,
+      "median_ms": 814.7291250061244,
+      "attempts": 70,
+      "backtracks": 18,
+      "model_calls": 4,
+      "invalid_model_responses": 0,
+      "model_errors": 0
+    }
+  }
+}

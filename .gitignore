@@ -1,0 +1,7 @@
+.DS_Store
+.venv/
+.hf-cache/
+__pycache__/
+node_modules/
+dist/
+benchmark/*.local.json

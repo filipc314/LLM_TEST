@@ -850,3 +850,29 @@ body {
   border-top: 1px solid var(--border-subtle);
   margin-top: auto;
 }
+.comparison-table-container {
+  overflow-x: auto;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.comparison-table caption {
+  margin-bottom: 0.5rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 0.35rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.comparison-table th:first-child {
+  text-align: left;
+}

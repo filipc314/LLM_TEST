@@ -1,15 +1,20 @@
 import React, { useState } from 'react';
+import { SOLVER_METRICS, SOLVER_MODES } from '../services/backendApi';
 
 export default function StatusCard({
   status,
   error,
-  latencyMs,
+  result,
+  comparison,
   cluesCount,
   conflictsCount,
-  rawResponse,
-  isSolving
+  isSolving,
+  useMock
 }) {
   const [showRaw, setShowRaw] = useState(false);
+  const rawResponse = result?.rawResponse;
+  const responseLabel = result?.fromMock ? 'Mock Details' : 'Backend Response';
+  const comparedModes = SOLVER_MODES.filter(({ id }) => comparison[id]);
 
   return (
     <div className="status-card">
@@ -24,11 +29,11 @@ export default function StatusCard({
               ⚠️ {conflictsCount} Conflict{conflictsCount > 1 ? 's' : ''} Found
             </span>
           ) : (
-            <span className="stat-badge stat-badge-success">✓ Grid Valid</span>
+            <span className="stat-badge stat-badge-success">✓ No Conflicts</span>
           )}
-          {latencyMs !== null && (
+          {result && (
             <span className="stat-badge stat-badge-info">
-              ⚡ LLM Latency: {latencyMs}ms
+              ⚡ {result.fromMock ? 'Mock Time' : 'Backend Time'}: {result.latencyMs} ms
             </span>
           )}
         </div>
@@ -39,7 +44,7 @@ export default function StatusCard({
             className="btn btn-text-sm"
             onClick={() => setShowRaw(!showRaw)}
           >
-            {showRaw ? 'Hide Raw LLM Response' : 'View Backend Response'}
+            {showRaw ? 'Hide' : 'View'} {responseLabel}
           </button>
         )}
       </div>
@@ -48,7 +53,7 @@ export default function StatusCard({
       {isSolving && (
         <div className="status-banner status-loading">
           <span className="pulse-dot"></span>
-          <span>Sending board state to LLM backend and waiting for solution...</span>
+          <span>{useMock ? 'Running the local Sudoku solver...' : 'Waiting for the backend to return a solution...'}</span>
         </div>
       )}
 
@@ -67,15 +72,46 @@ export default function StatusCard({
         <div className="status-banner status-success">
           <div className="success-icon">✨</div>
           <div className="success-content">
-            <strong>Sudoku successfully resolved!</strong> Newly filled numbers are highlighted with green badges.
+            <strong>{result?.fromMock ? 'Sudoku solved locally (mock).' : 'Sudoku solved by the backend.'}</strong>
           </div>
+        </div>
+      )}
+
+      {comparedModes.length > 0 && (
+        <div className="comparison-table-container">
+          <table className="comparison-table">
+            <caption>Results for this puzzle</caption>
+            <thead>
+              <tr>
+                <th scope="col">Metric</th>
+                {comparedModes.map(({ id, label }) => <th key={id} scope="col">{label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Result</th>
+                {comparedModes.map(({ id }) => (
+                  <td key={id}>{comparison[id].error ? 'Failed' : 'Solved'}</td>
+                ))}
+              </tr>
+              {SOLVER_METRICS.map(([key, label]) => (
+                <tr key={key}>
+                  <th scope="row">{label}</th>
+                  {comparedModes.map(({ id }) => {
+                    const value = comparison[id].stats?.[key];
+                    return <td key={id}>{key === 'elapsed_ms' ? value?.toFixed(2) ?? '—' : value ?? '—'}</td>;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
       {/* Raw Backend Response Drawer */}
       {showRaw && rawResponse && (
         <div className="raw-response-box">
-          <div className="raw-response-title">Raw Response Received from Backend:</div>
+          <div className="raw-response-title">{responseLabel}</div>
           <pre>{JSON.stringify(rawResponse, null, 2)}</pre>
         </div>
       )}

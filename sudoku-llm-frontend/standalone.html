@@ -6,279 +6,27 @@
   <title>LLM Sudoku Resolver (Standalone React Preview)</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧩</text></svg>">
   <!-- React 18 & ReactDOM via CDN for immediate zero-build execution -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin></script>
   <!-- Babel standalone to compile JSX in browser -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.28.5/babel.min.js"></script>
   <link rel="stylesheet" href="./src/index.css" />
 </head>
 <body>
   <div id="root"></div>
 
-  <script type="text/babel">
-    const { useState, useMemo, useEffect, useRef } = React;
+  <script type="text/babel" data-type="module" data-presets="react">
+    import {
+      DEFAULT_BACKEND_URL, SOLVER_MODES, SOLVER_METRICS, buildRequestBody, solveSudokuWithLLM
+    } from './src/services/backendApi.js';
+    import { createEmptyBoard, findBoardConflicts, countClues } from './src/utils/sudokuValidator.js';
+    import { PRESETS } from './src/utils/presets.js';
 
-    // Presets
-    const PRESETS = [
-      {
-        name: 'Easy Puzzle',
-        board: [
-          [5, 3, 0, 0, 7, 0, 0, 0, 0],
-          [6, 0, 0, 1, 9, 5, 0, 0, 0],
-          [0, 9, 8, 0, 0, 0, 0, 6, 0],
-          [8, 0, 0, 0, 6, 0, 0, 0, 3],
-          [4, 0, 0, 8, 0, 3, 0, 0, 1],
-          [7, 0, 0, 0, 2, 0, 0, 0, 6],
-          [0, 6, 0, 0, 0, 0, 2, 8, 0],
-          [0, 0, 0, 4, 1, 9, 0, 0, 5],
-          [0, 0, 0, 0, 8, 0, 0, 7, 9]
-        ]
-      },
-      {
-        name: 'Medium Puzzle',
-        board: [
-          [0, 2, 0, 6, 0, 8, 0, 0, 0],
-          [5, 8, 0, 0, 0, 9, 7, 0, 0],
-          [0, 0, 0, 0, 4, 0, 0, 0, 0],
-          [3, 7, 0, 0, 0, 0, 5, 0, 0],
-          [6, 0, 0, 0, 0, 0, 0, 0, 4],
-          [0, 0, 8, 0, 0, 0, 0, 1, 3],
-          [0, 0, 0, 0, 2, 0, 0, 0, 0],
-          [0, 0, 9, 8, 0, 0, 0, 3, 6],
-          [0, 0, 0, 3, 0, 6, 0, 9, 0]
-        ]
-      },
-      {
-        name: 'Hard (AI Challenge)',
-        board: [
-          [0, 0, 0, 0, 0, 0, 0, 1, 2],
-          [0, 0, 0, 0, 3, 5, 0, 0, 0],
-          [0, 0, 0, 6, 0, 0, 0, 7, 0],
-          [7, 0, 0, 0, 0, 0, 3, 0, 0],
-          [0, 0, 0, 4, 0, 0, 8, 0, 0],
-          [1, 0, 0, 0, 0, 0, 0, 0, 0],
-          [0, 0, 0, 1, 2, 0, 0, 0, 0],
-          [0, 8, 0, 0, 0, 0, 0, 4, 0],
-          [0, 5, 0, 0, 0, 0, 6, 0, 0]
-        ]
-      }
-    ];
-
-    const DEFAULT_BACKEND_URL = 'http://localhost:8000/api/solve-sudoku';
-
-    const PayloadFormat = {
-      GRID_2D: 'GRID_2D',
-      STRING_81: 'STRING_81',
-      COORDINATES: 'COORDINATES',
-      PROMPT_TEXT: 'PROMPT_TEXT'
-    };
-
-    function createEmptyBoard() {
-      return Array.from({ length: 9 }, () => Array(9).fill(0));
-    }
-
-    function findBoardConflicts(board) {
-      const conflicts = new Set();
-      for (let r = 0; r < 9; r++) {
-        const seen = new Map();
-        for (let c = 0; c < 9; c++) {
-          const val = board[r][c];
-          if (val && val !== 0) {
-            if (seen.has(val)) {
-              conflicts.add(`${r},${c}`);
-              conflicts.add(`${r},${seen.get(val)}`);
-            } else {
-              seen.set(val, c);
-            }
-          }
-        }
-      }
-      for (let c = 0; c < 9; c++) {
-        const seen = new Map();
-        for (let r = 0; r < 9; r++) {
-          const val = board[r][c];
-          if (val && val !== 0) {
-            if (seen.has(val)) {
-              conflicts.add(`${r},${c}`);
-              conflicts.add(`${seen.get(val)},${c}`);
-            } else {
-              seen.set(val, r);
-            }
-          }
-        }
-      }
-      for (let boxRow = 0; boxRow < 3; boxRow++) {
-        for (let boxCol = 0; boxCol < 3; boxCol++) {
-          const seen = new Map();
-          for (let r = 0; r < 3; r++) {
-            for (let c = 0; c < 3; c++) {
-              const row = boxRow * 3 + r;
-              const col = boxCol * 3 + c;
-              const val = board[row][col];
-              if (val && val !== 0) {
-                if (seen.has(val)) {
-                  conflicts.add(`${row},${col}`);
-                  conflicts.add(seen.get(val));
-                } else {
-                  seen.set(val, `${row},${col}`);
-                }
-              }
-            }
-          }
-        }
-      }
-      return conflicts;
-    }
-
-    function countClues(board) {
-      let count = 0;
-      for (let r = 0; r < 9; r++) {
-        for (let c = 0; c < 9; c++) {
-          if (board[r][c] && board[r][c] !== 0) count++;
-        }
-      }
-      return count;
-    }
-
-    function formatPayload(board, format = PayloadFormat.GRID_2D) {
-      switch (format) {
-        case PayloadFormat.STRING_81:
-          return board.flat().map(val => (val === 0 || val === null ? '0' : String(val))).join('');
-        case PayloadFormat.COORDINATES:
-          const knownCells = [];
-          for (let r = 0; r < 9; r++) {
-            for (let c = 0; c < 9; c++) {
-              if (board[r][c] && board[r][c] !== 0) {
-                knownCells.push({ row: r, col: c, value: board[r][c] });
-              }
-            }
-          }
-          return knownCells;
-        case PayloadFormat.PROMPT_TEXT:
-          return board
-            .map(row => row.map(v => (v === 0 || v === null ? '.' : v)).join(' '))
-            .join('\n');
-        case PayloadFormat.GRID_2D:
-        default:
-          return board.map(row => row.map(val => (val ? Number(val) : 0)));
-      }
-    }
-
-    async function solveSudokuWithLLM(board, config = {}) {
-      const {
-        endpoint = DEFAULT_BACKEND_URL,
-        apiKey = '',
-        payloadFormat = PayloadFormat.GRID_2D,
-        useMock = false
-      } = config;
-
-      const startTime = performance.now();
-
-      if (useMock) {
-        await new Promise(resolve => setTimeout(resolve, 600));
-        const grid = board.map(r => [...r]);
-
-        function isValid(g, r, c, k) {
-          for (let i = 0; i < 9; i++) {
-            const m = 3 * Math.floor(r / 3) + Math.floor(i / 3);
-            const n = 3 * Math.floor(c / 3) + (i % 3);
-            if (g[r][i] === k || g[i][c] === k || g[m][n] === k) return false;
-          }
-          return true;
-        }
-
-        function solve(g) {
-          for (let r = 0; r < 9; r++) {
-            for (let c = 0; c < 9; c++) {
-              if (!g[r][c] || g[r][c] === 0) {
-                for (let k = 1; k <= 9; k++) {
-                  if (isValid(g, r, c, k)) {
-                    g[r][c] = k;
-                    if (solve(g)) return true;
-                    g[r][c] = 0;
-                  }
-                }
-                return false;
-              }
-            }
-          }
-          return true;
-        }
-
-        if (!solve(grid)) {
-          throw new Error('Mock Solver: This board configuration has no valid Sudoku solution.');
-        }
-
-        return {
-          solution: grid,
-          rawResponse: {
-            status: 'success',
-            provider: 'mock_simulation',
-            note: 'Simulated LLM response. Set backend URL and uncheck mock mode to connect to your real LLM model.'
-          },
-          latencyMs: Math.round(performance.now() - startTime),
-          fromMock: true
-        };
-      }
-
-      // Live Backend Call
-      const requestBody = {
-        sudoku_board: formatPayload(board, payloadFormat),
-        format: payloadFormat,
-        model_params: {
-          temperature: 0.1,
-          task: 'solve_sudoku'
-        },
-        timestamp: new Date().toISOString()
-      };
-
-      const headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      };
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(requestBody)
-        });
-
-        if (!response.ok) {
-          const errText = await response.text().catch(() => '');
-          throw new Error(`Backend returned HTTP ${response.status}: ${errText || response.statusText}`);
-        }
-
-        const json = await response.json();
-        let solution = null;
-
-        if (json.solution && Array.isArray(json.solution)) solution = json.solution;
-        else if (json.board && Array.isArray(json.board)) solution = json.board;
-        else if (Array.isArray(json) && json.length === 9) solution = json;
-        else if (typeof json.solution === 'string' && json.solution.length >= 81) {
-          const clean = json.solution.replace(/[^0-9]/g, '');
-          solution = [];
-          for (let r = 0; r < 9; r++) {
-            solution.push(clean.slice(r * 9, (r + 1) * 9).split('').map(Number));
-          }
-        } else {
-          throw new Error('Unsupported response structure from backend. Expected solution array.');
-        }
-
-        return {
-          solution,
-          rawResponse: json,
-          latencyMs: Math.round(performance.now() - startTime),
-          fromMock: false
-        };
-      } catch (err) {
-        throw new Error(`Failed to connect to backend at "${endpoint}". Ensure backend is running and CORS is enabled. (${err.message})`);
-      }
-    }
+    const { useState, useMemo, useEffect } = React;
 
     // Sudoku Table Component
-    function SudokuTable({ board, initialClues, conflicts, isSolving, onCellChange, focusedCell, setFocusedCell }) {
+    function SudokuTable({ board, initialClues, conflicts, fromMock, isSolving, onCellChange, focusedCell, setFocusedCell }) {
+      const solverLabel = fromMock ? 'Mock' : 'Solved';
       useEffect(() => {
         if (focusedCell) {
           const el = document.getElementById(`cell-${focusedCell.r}-${focusedCell.c}`);
@@ -317,7 +65,7 @@
                 <tr key={`r-${r}`} className={`sudoku-row ${r % 3 === 2 && r !== 8 ? 'subgrid-bottom-border' : ''}`}>
                   {row.map((val, c) => {
                     const isInitialClue = initialClues[r][c] !== 0;
-                    const isSolvedByLLM = !isInitialClue && val !== 0;
+                    const isSolverFill = !isInitialClue && val !== 0;
                     const hasConflict = conflicts.has(`${r},${c}`);
                     const isFocused = focusedCell?.r === r && focusedCell?.c === c;
 
@@ -328,7 +76,7 @@
 
                     const cellStateClass = hasConflict
                       ? 'cell-conflict'
-                      : isSolvedByLLM
+                      : isSolverFill
                       ? 'cell-solved-llm'
                       : isInitialClue
                       ? 'cell-initial-clue'
@@ -355,7 +103,7 @@
                           aria-label={`Row ${r + 1}, Column ${c + 1}`}
                           autoComplete="off"
                         />
-                        {isSolvedByLLM && <span className="llm-pill" title="Solved by LLM">LLM</span>}
+                        {isSolverFill && <span className="llm-pill">{solverLabel}</span>}
                       </td>
                     );
                   })}
@@ -375,30 +123,31 @@
       const [isSolving, setIsSolving] = useState(false);
       const [status, setStatus] = useState('idle');
       const [error, setError] = useState(null);
-      const [latencyMs, setLatencyMs] = useState(null);
-      const [rawResponse, setRawResponse] = useState(null);
-      const [hasSolution, setHasSolution] = useState(false);
+      const [result, setResult] = useState(null);
+      const [comparison, setComparison] = useState({});
+      const comparedModes = SOLVER_MODES.filter(({ id }) => comparison[id]);
       const [isConfigOpen, setIsConfigOpen] = useState(false);
       const [showPayloadPreview, setShowPayloadPreview] = useState(false);
 
       const [backendConfig, setBackendConfig] = useState({
         endpoint: DEFAULT_BACKEND_URL,
         apiKey: '',
-        payloadFormat: PayloadFormat.GRID_2D,
+        mode: 'classic',
         useMock: true
       });
 
       const conflicts = useMemo(() => findBoardConflicts(board), [board]);
-      const cluesCount = useMemo(() => countClues(board), [board]);
+      const cluesCount = useMemo(() => countClues(initialClues), [initialClues]);
       const hasConflicts = conflicts.size > 0;
 
       const handleCellChange = (r, c, val) => {
-        const newBoard = board.map(row => [...row]);
+        if (board[r][c] === val && initialClues[r][c] === val) return;
         const newClues = initialClues.map(row => [...row]);
-        newBoard[r][c] = val;
         newClues[r][c] = val;
-        setBoard(newBoard);
+        setBoard(newClues);
         setInitialClues(newClues);
+        setResult(null);
+        setComparison({});
         setError(null);
         if (status !== 'idle') setStatus('idle');
       };
@@ -408,9 +157,9 @@
         handleCellChange(focusedCell.r, focusedCell.c, num);
       };
 
-      const handleSolve = async () => {
+      const handleSolve = async (compare = false) => {
         if (hasConflicts) {
-          setError('Please resolve conflicting numbers in red before submitting.');
+          setError('Please resolve conflicting numbers highlighted in red before submitting.');
           return;
         }
         if (cluesCount === 0) {
@@ -421,21 +170,33 @@
         setIsSolving(true);
         setStatus('solving');
         setError(null);
-        setRawResponse(null);
+        if (compare) setComparison({});
 
-        const locked = board.map(r => [...r]);
-        setInitialClues(locked);
-
+        const modes = compare ? SOLVER_MODES.map(({ id }) => id) : [backendConfig.mode];
+        let displayedResult = null;
+        const errors = [];
         try {
-          const result = await solveSudokuWithLLM(board, backendConfig);
-          setBoard(result.solution);
-          setLatencyMs(result.latencyMs);
-          setRawResponse(result.rawResponse);
-          setStatus('success');
-          setHasSolution(true);
-        } catch (err) {
-          setError(err.message || 'An error occurred during solving.');
-          setStatus('error');
+          for (const mode of modes) {
+            try {
+              const nextResult = await solveSudokuWithLLM(initialClues, { ...backendConfig, mode });
+              if (!displayedResult || mode === backendConfig.mode) displayedResult = nextResult;
+              if (nextResult.stats) {
+                setComparison(previous => ({ ...previous, [mode]: { stats: nextResult.stats } }));
+              }
+            } catch (err) {
+              const label = SOLVER_MODES.find(({ id }) => id === mode)?.label;
+              errors.push(compare ? `${label}: ${err.message}` : err.message);
+              if (!backendConfig.useMock) {
+                setComparison(previous => ({ ...previous, [mode]: { error: err.message, stats: err.stats } }));
+              }
+            }
+          }
+          if (displayedResult) {
+            setBoard(displayedResult.solution);
+            setResult(displayedResult);
+          }
+          setError(errors.length ? errors.join(' · ') : null);
+          setStatus(displayedResult ? 'success' : 'error');
         } finally {
           setIsSolving(false);
         }
@@ -447,16 +208,16 @@
         setInitialClues(empty);
         setStatus('idle');
         setError(null);
-        setLatencyMs(null);
-        setRawResponse(null);
-        setHasSolution(false);
+        setResult(null);
+        setComparison({});
       };
 
       const handleResetToClues = () => {
         setBoard(initialClues.map(r => [...r]));
         setStatus('idle');
         setError(null);
-        setHasSolution(false);
+        setResult(null);
+        setComparison({});
       };
 
       const handleLoadPreset = (presetBoard) => {
@@ -465,16 +226,8 @@
         setInitialClues(cloned.map(r => [...r]));
         setStatus('idle');
         setError(null);
-        setLatencyMs(null);
-        setRawResponse(null);
-        setHasSolution(false);
-      };
-
-      const previewPayload = {
-        sudoku_board: formatPayload(board, backendConfig.payloadFormat),
-        format: backendConfig.payloadFormat,
-        model_params: { temperature: 0.1, task: 'solve_sudoku' },
-        timestamp: new Date().toISOString()
+        setResult(null);
+        setComparison({});
       };
 
       return (
@@ -516,7 +269,7 @@
               {isConfigOpen && (
                 <div className="config-body">
                   <p className="config-description">
-                    Configure your backend endpoint, auth headers, and format. Leave Mock Mode enabled to test UI animations offline.
+                    Configure the local backend connection. Requests use a 9×9 grid.
                   </p>
                   <div className="form-grid">
                     <div className="form-group full-width">
@@ -525,31 +278,18 @@
                         type="text"
                         className="form-input"
                         value={backendConfig.endpoint}
-                        disabled={backendConfig.useMock}
+                        disabled={isSolving || backendConfig.useMock}
                         onChange={(e) => setBackendConfig({ ...backendConfig, endpoint: e.target.value })}
                       />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Board Data Format</label>
-                      <select
-                        className="form-select"
-                        value={backendConfig.payloadFormat}
-                        onChange={(e) => setBackendConfig({ ...backendConfig, payloadFormat: e.target.value })}
-                      >
-                        <option value={PayloadFormat.GRID_2D}>2D Array (number[9][9])</option>
-                        <option value={PayloadFormat.STRING_81}>81-Character String (e.g. 53007...)</option>
-                        <option value={PayloadFormat.COORDINATES}>List of Known Clues</option>
-                        <option value={PayloadFormat.PROMPT_TEXT}>ASCII Prompt Grid</option>
-                      </select>
                     </div>
                     <div className="form-group">
                       <label className="form-label">Authorization Token (Optional)</label>
                       <input
                         type="password"
                         className="form-input"
-                        placeholder="Bearer token"
+                        placeholder="Token or Bearer token"
                         value={backendConfig.apiKey}
-                        disabled={backendConfig.useMock}
+                        disabled={isSolving || backendConfig.useMock}
                         onChange={(e) => setBackendConfig({ ...backendConfig, apiKey: e.target.value })}
                       />
                     </div>
@@ -558,6 +298,7 @@
                         <input
                           type="checkbox"
                           checked={backendConfig.useMock}
+                          disabled={isSolving}
                           onChange={(e) => setBackendConfig({ ...backendConfig, useMock: e.target.checked })}
                         />
                         <span className="checkbox-text">
@@ -574,15 +315,15 @@
                       className="btn btn-text"
                       onClick={() => setShowPayloadPreview(!showPayloadPreview)}
                     >
-                      {showPayloadPreview ? 'Hide Outgoing JSON Payload' : 'Preview Outgoing JSON Payload to Backend'}
+                      {showPayloadPreview ? 'Hide Request Preview' : 'Preview Backend Request'}
                     </button>
                     {showPayloadPreview && (
                       <div className="payload-code-block">
                         <div className="payload-code-header">
-                          <span>POST {backendConfig.endpoint}</span>
-                          <span className="format-tag">{backendConfig.payloadFormat}</span>
+                          <span>{backendConfig.useMock ? 'Example request (mock mode)' : `POST ${backendConfig.endpoint}`}</span>
+                          <span className="format-tag">GRID_2D</span>
                         </div>
-                        <pre>{JSON.stringify(previewPayload, null, 2)}</pre>
+                        <pre>{JSON.stringify(buildRequestBody(initialClues, backendConfig.mode), null, 2)}</pre>
                       </div>
                     )}
                   </div>
@@ -601,7 +342,7 @@
                     </div>
                     <div className="legend">
                       <span className="legend-item"><span className="legend-chip legend-chip-clue"></span> Known Clue</span>
-                      <span className="legend-item"><span className="legend-chip legend-chip-llm"></span> Solved by LLM</span>
+                      <span className="legend-item"><span className="legend-chip legend-chip-llm"></span> Filled by Solver</span>
                       <span className="legend-item"><span className="legend-chip legend-chip-conflict"></span> Conflict</span>
                     </div>
                   </div>
@@ -610,6 +351,7 @@
                     board={board}
                     initialClues={initialClues}
                     conflicts={conflicts}
+                    fromMock={result?.fromMock}
                     isSolving={isSolving}
                     onCellChange={handleCellChange}
                     focusedCell={focusedCell}
@@ -628,10 +370,12 @@
                       {hasConflicts ? (
                         <span className="stat-badge stat-badge-danger">⚠️ {conflicts.size} Conflict(s)</span>
                       ) : (
-                        <span className="stat-badge stat-badge-success">✓ Grid Valid</span>
+                        <span className="stat-badge stat-badge-success">✓ No Conflicts</span>
                       )}
-                      {latencyMs !== null && (
-                        <span className="stat-badge stat-badge-info">⚡ Latency: {latencyMs}ms</span>
+                      {status === 'success' && result && (
+                        <span className="stat-badge stat-badge-info">
+                          ⚡ {result.fromMock ? 'Mock Time' : 'Backend Time'}: {result.latencyMs} ms
+                        </span>
                       )}
                     </div>
                   </div>
@@ -639,7 +383,7 @@
                   {isSolving && (
                     <div className="status-banner status-loading">
                       <span className="pulse-dot"></span>
-                      <span>Sending board to LLM backend and waiting for solution...</span>
+                      <span>{backendConfig.useMock ? 'Running the local Sudoku solver...' : 'Waiting for the backend to return a solution...'}</span>
                     </div>
                   )}
 
@@ -651,7 +395,37 @@
 
                   {status === 'success' && !error && (
                     <div className="status-banner status-success">
-                      <span>✨ <strong>Solved!</strong> Board solved successfully by LLM.</span>
+                      <span>✨ <strong>{result?.fromMock ? 'Sudoku solved locally (mock).' : 'Sudoku solved by the backend.'}</strong></span>
+                    </div>
+                  )}
+                  {comparedModes.length > 0 && (
+                    <div className="comparison-table-container">
+                      <table className="comparison-table">
+                        <caption>Results for this puzzle</caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Metric</th>
+                            {comparedModes.map(({ id, label }) => <th key={id} scope="col">{label}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <th scope="row">Result</th>
+                            {comparedModes.map(({ id }) => (
+                              <td key={id}>{comparison[id].error ? 'Failed' : 'Solved'}</td>
+                            ))}
+                          </tr>
+                          {SOLVER_METRICS.map(([key, label]) => (
+                            <tr key={key}>
+                              <th scope="row">{label}</th>
+                              {comparedModes.map(({ id }) => {
+                                const value = comparison[id].stats?.[key];
+                                return <td key={id}>{key === 'elapsed_ms' ? value?.toFixed(2) ?? '—' : value ?? '—'}</td>;
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
@@ -659,16 +433,33 @@
                 {/* Control Actions */}
                 <div className="card-panel">
                   <div className="control-bar-wrapper">
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="solver-mode">Solving method</label>
+                      <select id="solver-mode" className="form-select" value={backendConfig.mode}
+                        disabled={isSolving || backendConfig.useMock}
+                        onChange={(event) => setBackendConfig(previous => ({ ...previous, mode: event.target.value }))}>
+                        {SOLVER_MODES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+                      </select>
+                    </div>
                     <div className="action-buttons-group">
                       <button
                         className={`btn btn-primary ${isSolving ? 'btn-loading' : ''}`}
-                        onClick={handleSolve}
+                        onClick={() => handleSolve()}
                         disabled={isSolving || hasConflicts || cluesCount === 0}
                       >
-                        {isSolving ? 'Solving with LLM...' : 'Solve with LLM'}
+                        {backendConfig.useMock
+                          ? (isSolving ? 'Solving locally...' : 'Solve Locally (Mock)')
+                          : (isSolving ? 'Waiting for backend...' : 'Solve')}
                       </button>
 
-                      {hasSolution && (
+                      {!backendConfig.useMock && (
+                        <button className="btn btn-secondary" onClick={() => handleSolve(true)}
+                          disabled={isSolving || hasConflicts || cluesCount === 0}>
+                          Compare all methods
+                        </button>
+                      )}
+
+                      {result && (
                         <button className="btn btn-secondary" onClick={handleResetToClues} disabled={isSolving}>
                           Reset to Clues
                         </button>
