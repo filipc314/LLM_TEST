@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Sudoku Resolver (Standalone React Preview)</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧩</text></svg>">
+  <!-- React 18 & ReactDOM via CDN for immediate zero-build execution -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <!-- Babel standalone to compile JSX in browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="stylesheet" href="./src/index.css" />
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    // Presets
+    const PRESETS = [
+      {
+        name: 'Easy Puzzle',
+        board: [
+          [5, 3, 0, 0, 7, 0, 0, 0, 0],
+          [6, 0, 0, 1, 9, 5, 0, 0, 0],
+          [0, 9, 8, 0, 0, 0, 0, 6, 0],
+          [8, 0, 0, 0, 6, 0, 0, 0, 3],
+          [4, 0, 0, 8, 0, 3, 0, 0, 1],
+          [7, 0, 0, 0, 2, 0, 0, 0, 6],
+          [0, 6, 0, 0, 0, 0, 2, 8, 0],
+          [0, 0, 0, 4, 1, 9, 0, 0, 5],
+          [0, 0, 0, 0, 8, 0, 0, 7, 9]
+        ]
+      },
+      {
+        name: 'Medium Puzzle',
+        board: [
+          [0, 2, 0, 6, 0, 8, 0, 0, 0],
+          [5, 8, 0, 0, 0, 9, 7, 0, 0],
+          [0, 0, 0, 0, 4, 0, 0, 0, 0],
+          [3, 7, 0, 0, 0, 0, 5, 0, 0],
+          [6, 0, 0, 0, 0, 0, 0, 0, 4],
+          [0, 0, 8, 0, 0, 0, 0, 1, 3],
+          [0, 0, 0, 0, 2, 0, 0, 0, 0],
+          [0, 0, 9, 8, 0, 0, 0, 3, 6],
+          [0, 0, 0, 3, 0, 6, 0, 9, 0]
+        ]
+      },
+      {
+        name: 'Hard (AI Challenge)',
+        board: [
+          [0, 0, 0, 0, 0, 0, 0, 1, 2],
+          [0, 0, 0, 0, 3, 5, 0, 0, 0],
+          [0, 0, 0, 6, 0, 0, 0, 7, 0],
+          [7, 0, 0, 0, 0, 0, 3, 0, 0],
+          [0, 0, 0, 4, 0, 0, 8, 0, 0],
+          [1, 0, 0, 0, 0, 0, 0, 0, 0],
+          [0, 0, 0, 1, 2, 0, 0, 0, 0],
+          [0, 8, 0, 0, 0, 0, 0, 4, 0],
+          [0, 5, 0, 0, 0, 0, 6, 0, 0]
+        ]
+      }
+    ];
+
+    const DEFAULT_BACKEND_URL = 'http://localhost:8000/api/solve-sudoku';
+
+    const PayloadFormat = {
+      GRID_2D: 'GRID_2D',
+      STRING_81: 'STRING_81',
+      COORDINATES: 'COORDINATES',
+      PROMPT_TEXT: 'PROMPT_TEXT'
+    };
+
+    function createEmptyBoard() {
+      return Array.from({ length: 9 }, () => Array(9).fill(0));
+    }
+
+    function findBoardConflicts(board) {
+      const conflicts = new Set();
+      for (let r = 0; r < 9; r++) {
+        const seen = new Map();
+        for (let c = 0; c < 9; c++) {
+          const val = board[r][c];
+          if (val && val !== 0) {
+            if (seen.has(val)) {
+              conflicts.add(`${r},${c}`);
+              conflicts.add(`${r},${seen.get(val)}`);
+            } else {
+              seen.set(val, c);
+            }
+          }
+        }
+      }
+      for (let c = 0; c < 9; c++) {
+        const seen = new Map();
+        for (let r = 0; r < 9; r++) {
+          const val = board[r][c];
+          if (val && val !== 0) {
+            if (seen.has(val)) {
+              conflicts.add(`${r},${c}`);
+              conflicts.add(`${seen.get(val)},${c}`);
+            } else {
+              seen.set(val, r);
+            }
+          }
+        }
+      }
+      for (let boxRow = 0; boxRow < 3; boxRow++) {
+        for (let boxCol = 0; boxCol < 3; boxCol++) {
+          const seen = new Map();
+          for (let r = 0; r < 3; r++) {
+            for (let c = 0; c < 3; c++) {
+              const row = boxRow * 3 + r;
+              const col = boxCol * 3 + c;
+              const val = board[row][col];
+              if (val && val !== 0) {
+                if (seen.has(val)) {
+                  conflicts.add(`${row},${col}`);
+                  conflicts.add(seen.get(val));
+                } else {
+                  seen.set(val, `${row},${col}`);
+                }
+              }
+            }
+          }
+        }
+      }
+      return conflicts;
+    }
+
+    function countClues(board) {
+      let count = 0;
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          if (board[r][c] && board[r][c] !== 0) count++;
+        }
+      }
+      return count;
+    }
+
+    function formatPayload(board, format = PayloadFormat.GRID_2D) {
+      switch (format) {
+        case PayloadFormat.STRING_81:
+          return board.flat().map(val => (val === 0 || val === null ? '0' : String(val))).join('');
+        case PayloadFormat.COORDINATES:
+          const knownCells = [];
+          for (let r = 0; r < 9; r++) {
+            for (let c = 0; c < 9; c++) {
+              if (board[r][c] && board[r][c] !== 0) {
+                knownCells.push({ row: r, col: c, value: board[r][c] });
+              }
+            }
+          }
+          return knownCells;
+        case PayloadFormat.PROMPT_TEXT:
+          return board
+            .map(row => row.map(v => (v === 0 || v === null ? '.' : v)).join(' '))
+            .join('\n');
+        case PayloadFormat.GRID_2D:
+        default:
+          return board.map(row => row.map(val => (val ? Number(val) : 0)));
+      }
+    }
+
+    async function solveSudokuWithLLM(board, config = {}) {
+      const {
+        endpoint = DEFAULT_BACKEND_URL,
+        apiKey = '',
+        payloadFormat = PayloadFormat.GRID_2D,
+        useMock = false
+      } = config;
+
+      const startTime = performance.now();
+
+      if (useMock) {
+        await new Promise(resolve => setTimeout(resolve, 600));
+        const grid = board.map(r => [...r]);
+
+        function isValid(g, r, c, k) {
+          for (let i = 0; i < 9; i++) {
+            const m = 3 * Math.floor(r / 3) + Math.floor(i / 3);
+            const n = 3 * Math.floor(c / 3) + (i % 3);
+            if (g[r][i] === k || g[i][c] === k || g[m][n] === k) return false;
+          }
+          return true;
+        }
+
+        function solve(g) {
+          for (let r = 0; r < 9; r++) {
+            for (let c = 0; c < 9; c++) {
+              if (!g[r][c] || g[r][c] === 0) {
+                for (let k = 1; k <= 9; k++) {
+                  if (isValid(g, r, c, k)) {
+                    g[r][c] = k;
+                    if (solve(g)) return true;
+                    g[r][c] = 0;
+                  }
+                }
+                return false;
+              }
+            }
+          }
+          return true;
+        }
+
+        if (!solve(grid)) {
+          throw new Error('Mock Solver: This board configuration has no valid Sudoku solution.');
+        }
+
+        return {
+          solution: grid,
+          rawResponse: {
+            status: 'success',
+            provider: 'mock_simulation',
+            note: 'Simulated LLM response. Set backend URL and uncheck mock mode to connect to your real LLM model.'
+          },
+          latencyMs: Math.round(performance.now() - startTime),
+          fromMock: true
+        };
+      }
+
+      // Live Backend Call
+      const requestBody = {
+        sudoku_board: formatPayload(board, payloadFormat),
+        format: payloadFormat,
+        model_params: {
+          temperature: 0.1,
+          task: 'solve_sudoku'
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          const errText = await response.text().catch(() => '');
+          throw new Error(`Backend returned HTTP ${response.status}: ${errText || response.statusText}`);
+        }
+
+        const json = await response.json();
+        let solution = null;
+
+        if (json.solution && Array.isArray(json.solution)) solution = json.solution;
+        else if (json.board && Array.isArray(json.board)) solution = json.board;
+        else if (Array.isArray(json) && json.length === 9) solution = json;
+        else if (typeof json.solution === 'string' && json.solution.length >= 81) {
+          const clean = json.solution.replace(/[^0-9]/g, '');
+          solution = [];
+          for (let r = 0; r < 9; r++) {
+            solution.push(clean.slice(r * 9, (r + 1) * 9).split('').map(Number));
+          }
+        } else {
+          throw new Error('Unsupported response structure from backend. Expected solution array.');
+        }
+
+        return {
+          solution,
+          rawResponse: json,
+          latencyMs: Math.round(performance.now() - startTime),
+          fromMock: false
+        };
+      } catch (err) {
+        throw new Error(`Failed to connect to backend at "${endpoint}". Ensure backend is running and CORS is enabled. (${err.message})`);
+      }
+    }
+
+    // Sudoku Table Component
+    function SudokuTable({ board, initialClues, conflicts, isSolving, onCellChange, focusedCell, setFocusedCell }) {
+      useEffect(() => {
+        if (focusedCell) {
+          const el = document.getElementById(`cell-${focusedCell.r}-${focusedCell.c}`);
+          if (el) el.focus();
+        }
+      }, [focusedCell]);
+
+      const handleKeyDown = (e, r, c) => {
+        if (isSolving) return;
+        if (e.key === 'ArrowUp') { e.preventDefault(); setFocusedCell({ r: Math.max(0, r - 1), c }); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedCell({ r: Math.min(8, r + 1), c }); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); setFocusedCell({ r, c: Math.max(0, c - 1) }); }
+        else if (e.key === 'ArrowRight') { e.preventDefault(); setFocusedCell({ r, c: Math.min(8, c + 1) }); }
+        else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') {
+          e.preventDefault();
+          onCellChange(r, c, 0);
+        } else if (['1','2','3','4','5','6','7','8','9'].includes(e.key)) {
+          e.preventDefault();
+          onCellChange(r, c, Number(e.key));
+          if (c < 8) setFocusedCell({ r, c: c + 1 });
+          else if (r < 8) setFocusedCell({ r: r + 1, c: 0 });
+        }
+      };
+
+      const handleInputChange = (e, r, c) => {
+        const clean = e.target.value.replace(/[^1-9]/g, '');
+        const num = clean.length > 0 ? Number(clean.slice(-1)) : 0;
+        onCellChange(r, c, num);
+      };
+
+      return (
+        <div className="sudoku-table-container">
+          <table className="sudoku-table" role="grid" aria-label="Sudoku Grid">
+            <tbody>
+              {board.map((row, r) => (
+                <tr key={`r-${r}`} className={`sudoku-row ${r % 3 === 2 && r !== 8 ? 'subgrid-bottom-border' : ''}`}>
+                  {row.map((val, c) => {
+                    const isInitialClue = initialClues[r][c] !== 0;
+                    const isSolvedByLLM = !isInitialClue && val !== 0;
+                    const hasConflict = conflicts.has(`${r},${c}`);
+                    const isFocused = focusedCell?.r === r && focusedCell?.c === c;
+
+                    const borderClasses = [
+                      c % 3 === 2 && c !== 8 ? 'subgrid-right-border' : '',
+                      r % 3 === 2 && r !== 8 ? 'subgrid-bottom-border' : ''
+                    ].filter(Boolean).join(' ');
+
+                    const cellStateClass = hasConflict
+                      ? 'cell-conflict'
+                      : isSolvedByLLM
+                      ? 'cell-solved-llm'
+                      : isInitialClue
+                      ? 'cell-initial-clue'
+                      : 'cell-empty';
+
+                    return (
+                      <td
+                        key={`c-${c}`}
+                        className={`sudoku-cell ${borderClasses} ${cellStateClass} ${isFocused ? 'cell-focused' : ''}`}
+                        onClick={() => setFocusedCell({ r, c })}
+                      >
+                        <input
+                          id={`cell-${r}-${c}`}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[1-9]*"
+                          maxLength={1}
+                          disabled={isSolving}
+                          value={val === 0 || val === null ? '' : val}
+                          onKeyDown={(e) => handleKeyDown(e, r, c)}
+                          onChange={(e) => handleInputChange(e, r, c)}
+                          onFocus={() => setFocusedCell({ r, c })}
+                          className="cell-input"
+                          aria-label={`Row ${r + 1}, Column ${c + 1}`}
+                          autoComplete="off"
+                        />
+                        {isSolvedByLLM && <span className="llm-pill" title="Solved by LLM">LLM</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    // App Component
+    function App() {
+      const [board, setBoard] = useState(() => PRESETS[0].board.map(r => [...r]));
+      const [initialClues, setInitialClues] = useState(() => PRESETS[0].board.map(r => [...r]));
+      const [focusedCell, setFocusedCell] = useState({ r: 0, c: 0 });
+      const [isSolving, setIsSolving] = useState(false);
+      const [status, setStatus] = useState('idle');
+      const [error, setError] = useState(null);
+      const [latencyMs, setLatencyMs] = useState(null);
+      const [rawResponse, setRawResponse] = useState(null);
+      const [hasSolution, setHasSolution] = useState(false);
+      const [isConfigOpen, setIsConfigOpen] = useState(false);
+      const [showPayloadPreview, setShowPayloadPreview] = useState(false);
+
+      const [backendConfig, setBackendConfig] = useState({
+        endpoint: DEFAULT_BACKEND_URL,
+        apiKey: '',
+        payloadFormat: PayloadFormat.GRID_2D,
+        useMock: true
+      });
+
+      const conflicts = useMemo(() => findBoardConflicts(board), [board]);
+      const cluesCount = useMemo(() => countClues(board), [board]);
+      const hasConflicts = conflicts.size > 0;
+
+      const handleCellChange = (r, c, val) => {
+        const newBoard = board.map(row => [...row]);
+        const newClues = initialClues.map(row => [...row]);
+        newBoard[r][c] = val;
+        newClues[r][c] = val;
+        setBoard(newBoard);
+        setInitialClues(newClues);
+        setError(null);
+        if (status !== 'idle') setStatus('idle');
+      };
+
+      const handleSelectNumber = (num) => {
+        if (!focusedCell) return;
+        handleCellChange(focusedCell.r, focusedCell.c, num);
+      };
+
+      const handleSolve = async () => {
+        if (hasConflicts) {
+          setError('Please resolve conflicting numbers in red before submitting.');
+          return;
+        }
+        if (cluesCount === 0) {
+          setError('Please enter at least one known clue before solving.');
+          return;
+        }
+
+        setIsSolving(true);
+        setStatus('solving');
+        setError(null);
+        setRawResponse(null);
+
+        const locked = board.map(r => [...r]);
+        setInitialClues(locked);
+
+        try {
+          const result = await solveSudokuWithLLM(board, backendConfig);
+          setBoard(result.solution);
+          setLatencyMs(result.latencyMs);
+          setRawResponse(result.rawResponse);
+          setStatus('success');
+          setHasSolution(true);
+        } catch (err) {
+          setError(err.message || 'An error occurred during solving.');
+          setStatus('error');
+        } finally {
+          setIsSolving(false);
+        }
+      };
+
+      const handleClear = () => {
+        const empty = createEmptyBoard();
+        setBoard(empty);
+        setInitialClues(empty);
+        setStatus('idle');
+        setError(null);
+        setLatencyMs(null);
+        setRawResponse(null);
+        setHasSolution(false);
+      };
+
+      const handleResetToClues = () => {
+        setBoard(initialClues.map(r => [...r]));
+        setStatus('idle');
+        setError(null);
+        setHasSolution(false);
+      };
+
+      const handleLoadPreset = (presetBoard) => {
+        const cloned = presetBoard.map(r => [...r]);
+        setBoard(cloned);
+        setInitialClues(cloned.map(r => [...r]));
+        setStatus('idle');
+        setError(null);
+        setLatencyMs(null);
+        setRawResponse(null);
+        setHasSolution(false);
+      };
+
+      const previewPayload = {
+        sudoku_board: formatPayload(board, backendConfig.payloadFormat),
+        format: backendConfig.payloadFormat,
+        model_params: { temperature: 0.1, task: 'solve_sudoku' },
+        timestamp: new Date().toISOString()
+      };
+
+      return (
+        <div className="app-container">
+          <header className="app-header">
+            <div className="header-content">
+              <div className="logo-badge">
+                <span className="logo-icon">🧩</span>
+                <div>
+                  <h1 className="logo-title">LLM Sudoku Resolver</h1>
+                  <p className="logo-subtitle">Frontend interface for LLM-powered Sudoku solver models</p>
+                </div>
+              </div>
+              <div className="header-actions">
+                <button className="btn btn-secondary-sm" onClick={() => setIsConfigOpen(!isConfigOpen)}>
+                  ⚙️ Backend Settings
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <main className="main-content">
+            {/* Backend Config Drawer */}
+            <div className="backend-config-card">
+              <div className="config-header" onClick={() => setIsConfigOpen(!isConfigOpen)}>
+                <div className="config-title">
+                  <span>Backend & LLM API Configuration</span>
+                </div>
+                <div className="config-header-badges">
+                  {backendConfig.useMock ? (
+                    <span className="badge badge-warning">Simulated Mock Mode</span>
+                  ) : (
+                    <span className="badge badge-success">Live Backend Mode</span>
+                  )}
+                  <span className="toggle-chevron">{isConfigOpen ? '▲' : '▼'}</span>
+                </div>
+              </div>
+
+              {isConfigOpen && (
+                <div className="config-body">
+                  <p className="config-description">
+                    Configure your backend endpoint, auth headers, and format. Leave Mock Mode enabled to test UI animations offline.
+                  </p>
+                  <div className="form-grid">
+                    <div className="form-group full-width">
+                      <label className="form-label">Backend API Endpoint URL</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={backendConfig.endpoint}
+                        disabled={backendConfig.useMock}
+                        onChange={(e) => setBackendConfig({ ...backendConfig, endpoint: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Board Data Format</label>
+                      <select
+                        className="form-select"
+                        value={backendConfig.payloadFormat}
+                        onChange={(e) => setBackendConfig({ ...backendConfig, payloadFormat: e.target.value })}
+                      >
+                        <option value={PayloadFormat.GRID_2D}>2D Array (number[9][9])</option>
+                        <option value={PayloadFormat.STRING_81}>81-Character String (e.g. 53007...)</option>
+                        <option value={PayloadFormat.COORDINATES}>List of Known Clues</option>
+                        <option value={PayloadFormat.PROMPT_TEXT}>ASCII Prompt Grid</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Authorization Token (Optional)</label>
+                      <input
+                        type="password"
+                        className="form-input"
+                        placeholder="Bearer token"
+                        value={backendConfig.apiKey}
+                        disabled={backendConfig.useMock}
+                        onChange={(e) => setBackendConfig({ ...backendConfig, apiKey: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group full-width checkbox-group">
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={backendConfig.useMock}
+                          onChange={(e) => setBackendConfig({ ...backendConfig, useMock: e.target.checked })}
+                        />
+                        <span className="checkbox-text">
+                          <strong>Enable Local Mock Simulation</strong>
+                          <span className="checkbox-subtext">Allows testing frontend animations before backend is connected</span>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="payload-preview-section">
+                    <button
+                      type="button"
+                      className="btn btn-text"
+                      onClick={() => setShowPayloadPreview(!showPayloadPreview)}
+                    >
+                      {showPayloadPreview ? 'Hide Outgoing JSON Payload' : 'Preview Outgoing JSON Payload to Backend'}
+                    </button>
+                    {showPayloadPreview && (
+                      <div className="payload-code-block">
+                        <div className="payload-code-header">
+                          <span>POST {backendConfig.endpoint}</span>
+                          <span className="format-tag">{backendConfig.payloadFormat}</span>
+                        </div>
+                        <pre>{JSON.stringify(previewPayload, null, 2)}</pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="sudoku-workspace">
+              {/* Left Column: Sudoku Table */}
+              <section className="grid-section">
+                <div className="grid-card">
+                  <div className="grid-card-header">
+                    <div className="grid-title">
+                      <h2>Sudoku Board</h2>
+                      <span className="grid-hint">Click any cell and type 1–9. Arrow keys navigate.</span>
+                    </div>
+                    <div className="legend">
+                      <span className="legend-item"><span className="legend-chip legend-chip-clue"></span> Known Clue</span>
+                      <span className="legend-item"><span className="legend-chip legend-chip-llm"></span> Solved by LLM</span>
+                      <span className="legend-item"><span className="legend-chip legend-chip-conflict"></span> Conflict</span>
+                    </div>
+                  </div>
+
+                  <SudokuTable
+                    board={board}
+                    initialClues={initialClues}
+                    conflicts={conflicts}
+                    isSolving={isSolving}
+                    onCellChange={handleCellChange}
+                    focusedCell={focusedCell}
+                    setFocusedCell={setFocusedCell}
+                  />
+                </div>
+              </section>
+
+              {/* Right Column: Controls & Status */}
+              <section className="sidebar-section">
+                {/* Status Badges */}
+                <div className="status-card">
+                  <div className="status-row">
+                    <div className="stats-badges">
+                      <span className="stat-badge">Clues: <strong>{cluesCount}</strong> / 81</span>
+                      {hasConflicts ? (
+                        <span className="stat-badge stat-badge-danger">⚠️ {conflicts.size} Conflict(s)</span>
+                      ) : (
+                        <span className="stat-badge stat-badge-success">✓ Grid Valid</span>
+                      )}
+                      {latencyMs !== null && (
+                        <span className="stat-badge stat-badge-info">⚡ Latency: {latencyMs}ms</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {isSolving && (
+                    <div className="status-banner status-loading">
+                      <span className="pulse-dot"></span>
+                      <span>Sending board to LLM backend and waiting for solution...</span>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div className="status-banner status-error">
+                      <span>❌ <strong>Error:</strong> {error}</span>
+                    </div>
+                  )}
+
+                  {status === 'success' && !error && (
+                    <div className="status-banner status-success">
+                      <span>✨ <strong>Solved!</strong> Board solved successfully by LLM.</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Control Actions */}
+                <div className="card-panel">
+                  <div className="control-bar-wrapper">
+                    <div className="action-buttons-group">
+                      <button
+                        className={`btn btn-primary ${isSolving ? 'btn-loading' : ''}`}
+                        onClick={handleSolve}
+                        disabled={isSolving || hasConflicts || cluesCount === 0}
+                      >
+                        {isSolving ? 'Solving with LLM...' : 'Solve with LLM'}
+                      </button>
+
+                      {hasSolution && (
+                        <button className="btn btn-secondary" onClick={handleResetToClues} disabled={isSolving}>
+                          Reset to Clues
+                        </button>
+                      )}
+
+                      <button className="btn btn-outline" onClick={handleClear} disabled={isSolving}>
+                        Clear Board
+                      </button>
+                    </div>
+
+                    <div className="presets-group">
+                      <span className="presets-label">Load Preset:</span>
+                      <div className="presets-buttons">
+                        {PRESETS.map((p) => (
+                          <button
+                            key={p.name}
+                            className="btn btn-chip"
+                            disabled={isSolving}
+                            onClick={() => handleLoadPreset(p.board)}
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="numpad-container">
+                      <span className="numpad-label">Quick Input Pad:</span>
+                      <div className="numpad-keys">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                          <button
+                            key={num}
+                            type="button"
+                            className="numpad-key"
+                            disabled={isSolving}
+                            onClick={() => handleSelectNumber(num)}
+                          >
+                            {num}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className="numpad-key numpad-erase"
+                          disabled={isSolving}
+                          onClick={() => handleSelectNumber(0)}
+                          title="Erase cell"
+                        >
+                          ⌫
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Developer Integration Note */}
+                <div className="card-panel developer-notes">
+                  <h3 className="notes-title"><span>🔌</span> Backend Integration Note</h3>
+                  <p className="notes-text">
+                    This frontend sends known clues to your backend. Check <code>src/services/backendApi.js</code> to configure your endpoint, custom auth, and payload schema.
+                  </p>
+                </div>
+              </section>
+            </div>
+          </main>
+
+          <footer className="app-footer">
+            <p>React Frontend for Custom LLM Sudoku Solvers</p>
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
